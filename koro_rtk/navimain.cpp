@@ -7,6 +7,76 @@ rtksvr_t svr;
 stream_t moni;
 
 
+// receiver options table ---------------------------------------------------
+static int strtype[]={                  /* stream types */
+    STR_NONE,STR_NONE,STR_NONE,STR_NONE,STR_NONE,STR_NONE,STR_NONE,STR_NONE
+};
+static char strpath[8][MAXSTR]={""};    /* stream paths */
+static int strfmt[]={                   /* stream formats */
+    STRFMT_RTCM3,STRFMT_RTCM3,STRFMT_SP3,SOLF_LLH,SOLF_NMEA,0,0,0
+};
+static int svrcycle     =10;            /* server cycle (ms) */
+static int timeout      =10000;         /* timeout time (ms) */
+static int reconnect    =10000;         /* reconnect interval (ms) */
+static int nmeacycle    =5000;          /* nmea request cycle (ms) */
+static int fswapmargin  =30;            /* file swap marign (s) */
+static int buffsize     =32768;         /* input buffer size (bytes) */
+static int navmsgsel    =0;             /* navigation mesaage select */
+static int nmeareq      =0;             /* nmea request type (0:off,1:lat/lon,2:single) */
+static double nmeapos[] ={0,0};         /* nmea position (lat/lon) (deg) */
+static char proxyaddr[MAXSTR]="";       /* proxy address */
+
+
+#define TIMOPT  "0:gpst,1:utc,2:jst,3:tow"
+#define CONOPT  "0:dms,1:deg,2:xyz,3:enu,4:pyl"
+#define FLGOPT  "0:off,1:std+2:age/ratio/ns"
+#define ISTOPT  "0:off,1:serial,2:file,3:tcpsvr,4:tcpcli,6:ntripcli,7:ftp,8:http"
+#define OSTOPT  "0:off,1:serial,2:file,3:tcpsvr,4:tcpcli,5:ntripsvr,9:ntrcaster"
+#define FMTOPT  "0:rtcm2,1:rtcm3,2:oem4,3:oem3,4:ubx,5:ss2,6:hemis,7:skytraq,8:javad,9:nvs,10:binex,11:rt17,12:spt,13:rnx,14:sp3,15:clk,16:sbas,17:nmea"
+#define NMEOPT  "0:off,1:latlon,2:single"
+#define SOLOPT  "0:llh,1:xyz,2:enu,3:nmea"
+#define MSGOPT  "0:all,1:rover,2:base,3:corr"
+
+static opt_t rcvopts[]={
+    {"inpstr1-type",    3,  (void *)&strtype[0],         ISTOPT },
+    {"inpstr2-type",    3,  (void *)&strtype[1],         ISTOPT },
+    {"inpstr3-type",    3,  (void *)&strtype[2],         ISTOPT },
+    {"inpstr1-path",    2,  (void *)strpath [0],         ""     },
+    {"inpstr2-path",    2,  (void *)strpath [1],         ""     },
+    {"inpstr3-path",    2,  (void *)strpath [2],         ""     },
+    {"inpstr1-format",  3,  (void *)&strfmt [0],         FMTOPT },
+    {"inpstr2-format",  3,  (void *)&strfmt [1],         FMTOPT },
+    {"inpstr3-format",  3,  (void *)&strfmt [2],         FMTOPT },
+    {"inpstr2-nmeareq", 3,  (void *)&nmeareq,            NMEOPT },
+    {"inpstr2-nmealat", 1,  (void *)&nmeapos[0],         "deg"  },
+    {"inpstr2-nmealon", 1,  (void *)&nmeapos[1],         "deg"  },
+    {"outstr1-type",    3,  (void *)&strtype[3],         OSTOPT },
+    {"outstr2-type",    3,  (void *)&strtype[4],         OSTOPT },
+    {"outstr1-path",    2,  (void *)strpath [3],         ""     },
+    {"outstr2-path",    2,  (void *)strpath [4],         ""     },
+    {"outstr1-format",  3,  (void *)&strfmt [3],         SOLOPT },
+    {"outstr2-format",  3,  (void *)&strfmt [4],         SOLOPT },
+    {"logstr1-type",    3,  (void *)&strtype[5],         OSTOPT },
+    {"logstr2-type",    3,  (void *)&strtype[6],         OSTOPT },
+    {"logstr3-type",    3,  (void *)&strtype[7],         OSTOPT },
+    {"logstr1-path",    2,  (void *)strpath [5],         ""     },
+    {"logstr2-path",    2,  (void *)strpath [6],         ""     },
+    {"logstr3-path",    2,  (void *)strpath [7],         ""     },
+
+    {"misc-svrcycle",   0,  (void *)&svrcycle,           "ms"   },
+    {"misc-timeout",    0,  (void *)&timeout,            "ms"   },
+    {"misc-reconnect",  0,  (void *)&reconnect,          "ms"   },
+    {"misc-nmeacycle",  0,  (void *)&nmeacycle,          "ms"   },
+    {"misc-buffsize",   0,  (void *)&buffsize,           "bytes"},
+    {"misc-navmsgsel",  3,  (void *)&navmsgsel,          MSGOPT },
+    {"misc-proxyaddr",  2,  (void *)proxyaddr,           ""     },
+    {"misc-fswapmargin",0,  (void *)&fswapmargin,        "s"    },
+
+    {"",0,NULL,""}
+};
+
+
+
 NaviMain::NaviMain(QWidget *parent)
     : QWidget(parent)
     , ui(new Ui::NaviMain)
@@ -20,21 +90,12 @@ NaviMain::NaviMain(QWidget *parent)
 
     connect(&Timer,SIGNAL(timeout()),this,SLOT(outPutSol()));
 
-
-
-
-
     qDebug()<<"start";
     svrstart();
-
-
 
     Timer.setInterval(100);
     Timer.setSingleShot(false);
     Timer.start();
-
-
-
 
 }
 
@@ -44,111 +105,47 @@ NaviMain::~NaviMain()
 }
 
 
-
 void NaviMain::svrstart()
 {
 
-
-    int strtype[8]={                  /* stream types */
-       STR_SERIAL,STR_NONE,STR_NONE,STR_NONE,STR_NONE,STR_NONE,STR_NONE,STR_NONE
-   };
-    char strpath[8][MAXSTR]={"","","","","","","",""}; /* stream paths */
-    int strfmt[5]={                   /* stream formats */
-       STRFMT_UBX,STRFMT_RTCM3,STRFMT_SP3,SOLF_LLH,SOLF_NMEA
-   };
-    int svrcycle     =10;            /* server cycle (ms) */
-
-    int nmeacycle    =5000;          /* nmea request cycle (ms) */
-    int buffsize     =32768;         /* input buffer size (bytes) */
-    int navmsgsel    =0;             /* navigation mesaage select */
-
-    int nmeareq      =0;             /* nmea request type (0:off,1:lat/lon,2:single) */
-    double nmeapos[3] ={0,0,0};       /* nmea position (lat/lon/height) (deg,m) */
-
+    //conf文件读取路径
+    const char* optfile="G:/RTKTEST.conf";
 
     char errmsg[2048]="";
-    //初始化
+    //初始化 流路径
     qDebug()<<"init";
     char *paths[8]={
         strpath[0],strpath[1],strpath[2],strpath[3],strpath[4],strpath[5],
         strpath[6],strpath[7]
     };
 
-    //设置处理间隔  最小1
-    svrcycle=10;
-    //设置buffsize 最小4096
-    buffsize=32768;
-
-
-
-    //设置处理间隔  最小1
-    svrcycle=10;
-    //设置buffsize 最小4096
-    buffsize=32768;
-    //输入输出流设置 in：0-2  out：3-4   log：5-8
-    //设置输入输出类型  strtype[x] =STR_XXXX
-    //设置输入输出路径  paths[x]   =
-    //设置输入输出格式  strfmt[x]  =STRFMT_XXXX
-    strtype[0]=STR_NTRIPCLI;
-    char path0[MAXSTR]="chdc01:123456@114.55.137.33/TQ01";
-    paths[0]=path0;
-    strfmt[0]=STRFMT_RTCM3;
-
-    strtype[1]=STR_NTRIPCLI;
-    char path1[MAXSTR]="chdc01:123456@114.55.137.33/TQ02";
-    paths[1]=path1;
-    strfmt[1]=STRFMT_RTCM3;
-
-    strtype[2]=STR_NTRIPCLI;
-    char path2[MAXSTR]="chdc01:123456@114.55.137.33/NAVM";
-    paths[2]=path2;
-    strfmt[2]=STRFMT_RTCM3;
-
-
-    strtype[3]=STR_FILE;
-    char path3[MAXSTR]="G:/resultB34.txt";paths[3]=path3;
-    strfmt[3]=SOLF_LLH;
-
-
-    //设置导航信息选择 navigation mesaage select 0:all 1:rover 2:base  3:correct
-    navmsgsel=0;
-
+    //定义opt
     prcopt_t prcopt=prcopt_default;
     solopt_t solopt=solopt_default;
     filopt_t filopt={};
 
-
-    //cmd和cmd_periodic  3个输入流
+    //cmd和cmd_periodic  3个输入流的cmd指令
     char*cmds[3]={0,0,0};
     char*cmds_periodic[3]={0,0,0};
 
-
-    //接收机相关设置和RTCM相关设置 3个流  char opt[256]
+    //接收机相关设置和RTCM相关设置 3个流  char opt[256]  命令？
     char *ropts[3]={"","",""};
 
-    //设置nmeacycle 最小1000
-    //设置nmeareq 0：no  1：nmeapos  2：single sol
-    //设置nmeapos (lat/lon/height) (deg,m)
-    nmeacycle=5000;
-    nmeareq=0;
-    nmeapos[0]=0;
-    nmeapos[1]=0;
-    nmeapos[2]=0;
 
-
-    const char* optfile="G:/RTK.conf";
      qDebug()<<"loadopt";
-    resetsysopts();//初始化
-    loadopts(optfile,sysopts);//将conf文件读入到 sysopts（prcopt_ solopt_ filopt_ 等）
+
+    //初始化 opt全局变量
+    resetsysopts();
+
+    //将conf文件读入到 sysopts（prcopt_ solopt_ filopt_ 等）
+    loadopts(optfile,sysopts);
+    //
+    loadopts(optfile,rcvopts);
 
 
-    //getsysopts(&prcopt,&solopt,1,&filopt);//将prcopt_ solopt_ filopt_等赋值给prcopt,solopt,filopt
 
-    prcopt_t *PRCOPT=&prcopt;
-    solopt_t *SOLOPT=&solopt;
-    filopt_t *FILEOPT=&filopt;
-
-    getsysopts(PRCOPT,SOLOPT,FILEOPT);
+    //将prcopt_ solopt_ filopt_等赋值给prcopt,solopt,filopt
+    getsysopts(&prcopt,&solopt,&filopt);
 
 
     qDebug()<<"svrinit";
