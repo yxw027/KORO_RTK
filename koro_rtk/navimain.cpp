@@ -109,7 +109,7 @@ void NaviMain::svrstart()
 {
 
     //conf文件读取路径
-    const char* optfile="G:/RTKTEST.conf";
+    const char* optfile="G:/GitHub/KORO_RTK/conf/RTKTEST.conf";
 
     char errmsg[2048]="";
     //初始化 流路径
